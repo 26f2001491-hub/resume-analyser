@@ -3,37 +3,45 @@ import joblib
 from pydantic import BaseModel
 import fitz
 import json
-from google import genai  # SAHI ✅
+from google import genai
 import os
+import time
 
 app = FastAPI()
 model = joblib.load("model.pkl")
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+
 class Student(BaseModel):
-    Cgpa : float
-    interships:int
-    projects:int
+    Cgpa: float
+    interships: int
+    projects: int
+
 
 class prediction_response(BaseModel):
-    placement_probility : float
+    placement_probility: float
 
-@app.post("/predict",response_model =prediction_response )
-def predcit(student:Student):
-    prediction = model.predict([[student.Cgpa,student.interships,student.projects]])
-    return {"placement_probility":round(float(prediction[0]),2)}
 
-def extract_text_from_pdf(file_bytes :bytes) ->str:
+@app.get("/")
+def root():
+    return {"message": "Resume Analyser API is live!"}
+
+
+@app.post("/predict", response_model=prediction_response)
+def predcit(student: Student):
+    prediction = model.predict([[student.Cgpa, student.interships, student.projects]])
+    return {"placement_probility": round(float(prediction[0]), 2)}
+
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
-    text =""
+    text = ""
     for page in doc:
         text += page.get_text()
-        return text.strip()
-    
+    return text.strip()  # loop ke BAHAR — ye bug tha tera
+
 
 def analyze_with_gemini(resume_text: str) -> dict:
-    """Gemini se full analysis lo"""
-    
     prompt = f"""
     Tujhe ek resume analyzer ka kaam karna hai. Neeche ek resume ka text hai.
     
@@ -63,38 +71,42 @@ def analyze_with_gemini(resume_text: str) -> dict:
     Resume text:
     {resume_text[:4000]}
     """
-    response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents=prompt
-)
-    raw = response.text.strip()
-    
-    # JSON clean karo (Gemini kabhi kabhi ```json wrap karta hai)
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    
-    return json.loads(raw)
+
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",  # 2.0/2.5 busy rehta hai, 1.5 stable hai
+                contents=prompt
+            )
+            raw = response.text.strip()
+
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+
+            return json.loads(raw)
+
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(3)
+                continue
+            return {"error": f"AI service busy hai, baad mein try karo: {str(e)}"}
 
 
 @app.post("/analyze-resume")
 async def analyze_resume(file: UploadFile = File(...)):
-    
-    # Sirf PDF allow karo
+
     if file.content_type != "application/pdf":
         return {"error": "Sirf PDF file upload karo!"}
-    
-    # File bytes read karo
+
     file_bytes = await file.read()
-    
-    # Text extract karo
+
     resume_text = extract_text_from_pdf(file_bytes)
-    
+
     if not resume_text or len(resume_text) < 50:
         return {"error": "PDF se text nahi nikal paya. Scanned image PDF hai kya?"}
-    
-    # Gemini se analyze karo
+
     analysis = analyze_with_gemini(resume_text)
-    
+
     return analysis
