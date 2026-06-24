@@ -75,7 +75,7 @@ def analyze_with_gemini(resume_text: str) -> dict:
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model="gemini-1.5-flash",  # 2.0/2.5 busy rehta hai, 1.5 stable hai
+                model="gemini-2.0-flash",  # 2.0/2.5 busy rehta hai, 1.5 stable hai
                 contents=prompt
             )
             raw = response.text.strip()
